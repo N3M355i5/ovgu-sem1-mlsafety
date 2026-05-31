@@ -31,4 +31,4 @@ Machine learning systems behave fundamentally differently from classical softwar
 ## Author
 
 **Aryan Varshneya**
-M.Sc. Student - OVGU Magdeburg
+M.Sc. DKE - OVGU Magdeburg
