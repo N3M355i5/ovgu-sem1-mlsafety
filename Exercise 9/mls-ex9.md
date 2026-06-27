@@ -246,86 +246,81 @@ Two things are worth highlighting in the table:
   of more false positives (FP: 2243 → 2894) - exactly the trade-off the asymmetric cost
   structure rewards, since each FN is worth 100 FPs.
 
----
-
 ## Exercise 7.7: Tracing Overconfidence Through the Safety Analysis
 
-**1. Causal scenario**
+This exercise does not introduce a new hazard or UCA - it adds a **new causal
+scenario** to the existing UCA from Exercise 2.6/2.8, using the same table formats
+as Exercise Sheet 2.
 
-Extending the existing hazard ("vehicle fails to brake for a pedestrian") and unsafe
-control action ("the planner does not command braking while a pedestrian is in the
-path") from Exercise 2.4/2.6:
+**Existing hazard (Exercise 2.4):** `H-#` - "Vehicle fails to brake for a pedestrian
+in its path."
 
-> **New causal scenario:** The pedestrian classifier produces a **false negative**
-> (a pedestrian is present but $p(\text{ped}\mid x)$ is reported low) **while
-> simultaneously being overconfident** about that low score - e.g. $p < 0.01$ when
-> the _true_, well-calibrated probability would have been much higher. Because the
-> reported confidence is high (i.e. "confidently no pedestrian"), the planner treats
-> the prediction as reliable, registers "no pedestrian, reliable," and does **not**
-> trigger any low-confidence fallback (e.g. handing control to a human, as introduced
-> in the "Reject Option" lecture content). The UCA - failing to command braking -
-> therefore occurs not because the classifier was simply wrong, but because
-> **miscalibration hid the wrongness from the downstream safety mechanism that was
-> specifically designed to catch it.**
+**Existing UCA (Exercise 2.6):** `UCA-#` - Controller: _Planning module_; Control
+action: _brake command_; UCA type: _Not provided_ (a required braking action is
+missing); Hazard(s): `H-#`; Unsafe scenario: "The planner does not command braking
+while a pedestrian is in the path."
+
+---
+
+**1. Causal scenario** _(new row for the Exercise 2.8 table)_
+
+| UCA     | Causal scenario                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Root cause                                                                                                                                                                                                                                                                                                                                                                                                            | Related constraint                                                                               |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `UCA-#` | The pedestrian classifier produces a **false negative** (a pedestrian is present but $p(\text{ped}\mid x)$ is reported low) **while simultaneously being overconfident** about that low score - e.g. the model reports $p < 0.01$ when the _true_, well-calibrated probability would have been much higher. Because the reported confidence is high (i.e. "confidently no pedestrian"), the planner registers "no pedestrian, reliable" and does **not** trigger any low-confidence fallback. | **Flawed internal model**: the controller (planner) treats a low _reported_ probability as equivalent to a low _true_ probability - i.e. it implicitly assumes the classifier is calibrated. This assumption fails because the model is overconfident (measured ECE = 0.1075 uncalibrated, see Ex. 7.4), so the planner's internal model of "how much to trust this score" is miscalibrated to the actual error rate. | `SC-M-#` (model-level ECE constraint, below), `SC-S-#` (system-level fallback constraint, below) |
 
 This is distinct from a plain "the classifier was wrong" scenario: a _calibrated_
 classifier that was equally likely to be wrong on this input would have reported a
 correspondingly higher uncertainty, which _would_ have triggered the fallback. The
 causal factor here is specifically the **gap between reported confidence and true
-correctness rate** - i.e., calibration failure - not classification accuracy itself.
+correctness rate** (calibration failure), not classification accuracy itself.
 
-**2. Safety constraints**
+---
 
-- **Model-level constraint (on calibration):**
+**2. Safety constraints** _(new rows for the Exercise 2.7 table)_
 
-  > The pedestrian classifier's Expected Calibration Error (ECE), measured on a
-  > representative in-distribution test set with $\ge 20$ confidence bins, **must not
-  > exceed 0.05** prior to deployment. (Our measured uncalibrated ECE of **0.1075**
-  > violates this; our temperature-scaled ECE of **0.0746** still violates it -
-  > see point 3.)
+| UCA     | Safety constraint                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Level            | Verification                                                                                                                                                        |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UCA-#` | The pedestrian classifier's Expected Calibration Error (ECE), measured on a representative in-distribution test set with $\geq 20$ confidence bins, **must not exceed 0.05** prior to deployment.                                                                                                                                                                                                                                                                              | **Model-level**  | Measure ECE on the test set (Exercise 7.4 method); compare against the 0.05 bound.                                                                                  |
+| `UCA-#` | The planner **must not** rely on the raw $\arg\max$/$\tau=0.5$ decision rule for braking decisions involving pedestrians. It must apply the cost-optimal threshold $\tau^*\approx 0.0099$ (Exercise 7.3) to the model's _calibrated_ probability output, **and** must trigger a human-handover/low-confidence fallback (selective prediction / reject option) whenever the calibrated confidence in a "no pedestrian" prediction falls below a defined margin around $\tau^*$. | **System-level** | Integration test / simulation: inject known pedestrian-present frames near the decision boundary and confirm the fallback triggers rather than a silent "continue." |
 
-- **System-level constraint (on planner usage of the confidence score):**
-  > The planner **must not** rely on the raw $\arg\max$/$\tau=0.5$ decision rule for
-  > braking decisions involving pedestrians. It must instead apply the cost-optimal
-  > threshold $\tau^* \approx 0.0099$ (derived from the FN/FP cost asymmetry in
-  > Exercise 7.3) to the model's _calibrated_ probability output, **and** must trigger
-  > a human-handover / low-confidence fallback whenever the calibrated confidence in
-  > a "no pedestrian" prediction falls below a defined margin around $\tau^*$ (i.e.
-  > selective prediction / the reject option, rather than a hard binary cutoff).
+---
 
 **3. Verification**
 
-The evidence for the model-level constraint is exactly what was produced in 7.4–7.5:
-the **measured ECE before calibration (0.1075) and after temperature scaling (0.0746)**
-for the Pedestrian model.
+The evidence for the **model-level** constraint (`SC-M-#`) is exactly what was
+produced in Exercises 7.4–7.5: the measured ECE **before** calibration (**0.1075**)
+and **after** temperature scaling (**0.0746**) for the Pedestrian model.
 
 **Does the calibrated model meet the threshold?** **No.** Even after temperature
-scaling, ECE = 0.0746 still exceeds the proposed 0.05 constraint. Temperature scaling
+scaling, ECE = 0.0746 still exceeds the proposed 0.05 bound. Temperature scaling
 _helped_ (0.1075 → 0.0746, a 31% reduction) but is **not sufficient on its own** to
-bring this particular model into compliance - it is a cheap post-hoc fix, not a
-guarantee of meeting an arbitrary calibration bar. This would need to be flagged in
-a real STPA review as an **open, unverified constraint** requiring further mitigation
-(e.g. retraining with weight decay, an ensemble, or a tightened reject-option margin
-to compensate for the residual miscalibration).
+bring this model into compliance - it is a cheap post-hoc fix, not a guarantee of
+meeting an arbitrary calibration bar. Per Exercise 2.9's logic (mapping constraints
+to evidence), this constraint should be flagged as **open / not yet verified**,
+requiring further mitigation (e.g. retraining with weight decay, an ensemble, or a
+tightened reject-option margin) before the model-level constraint can be marked
+satisfied.
+
+---
 
 **4. Residual risk**
 
-Even a _perfectly_ calibrated model (ECE = 0) does **not** close this loss scenario on
+Even a _perfectly_ calibrated model (ECE = 0) would **not** fully close `UCA-#` on
 its own, for two reasons demonstrated directly in our results:
 
-1. **Calibration only holds in-distribution.** As covered in the lecture ("Calibration
-   under Distribution Shift"), a temperature fit on clean validation data does not
-   transfer to OOD or shifted conditions - the in-distribution ECE we measured says
-   nothing about night driving, fog, sensor faults, or adversarial inputs, where the
-   model may again become silently overconfident.
-2. **Calibration is a probabilistic, not a deterministic, guarantee.** Even a
-   calibrated model with $\tau^*$ correctly applied still produces some false
-   negatives in expectation - in our 7.6 results the calibrated model only drove FN
-   to exactly 0 _on this particular test set_, which is not a guarantee it generalizes
-   to every future input.
+1. **Calibration only holds in-distribution.** A temperature fit on clean validation
+   data does not transfer to OOD or shifted conditions (night driving, fog, sensor
+   faults, adversarial inputs) - exactly the kind of conditions the ODD from
+   Exercise 2.2 is meant to bound. Outside the ODD, the model may again become
+   silently overconfident, and the model-level constraint provides no guarantee there.
+2. **Calibration is a probabilistic, not a deterministic, guarantee.** Even with
+   $\tau^*$ correctly applied to a calibrated model, our Exercise 7.6 results only
+   show FN driven to exactly 0 _on this particular test set_ - not a guarantee that
+   holds for every future input.
 
-Therefore, **the system-level fallback (the reject option / human handover) is still
-required** - calibration reduces _how often_ the fallback needs to trigger and makes
-the threshold rule meaningful, but it cannot replace the fallback as the last line of
-defense. The model-level constraint (ECE bound) and the system-level constraint
-(fallback + cost-optimal threshold) are complementary, not substitutes for one another.
+Therefore the **system-level constraint (`SC-S-#`, the reject-option fallback) remains
+required** even if the model-level constraint is eventually satisfied. Calibration
+reduces _how often_ the fallback needs to trigger and makes the cost-optimal threshold
+meaningful, but - consistent with the Exercise 2.7 classification of constraints into
+model-level vs. system-level - it cannot substitute for the system-level fallback as
+the last line of defense against this causal scenario.
